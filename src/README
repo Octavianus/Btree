@@ -1,0 +1,10 @@
+all the files in this directory:
+
+Makefile: the makefile
+
+btfile.h, btindex_page.h, btleaf_page.h, btreefilescan.h:
+you need to complete them and write the corresponding .C files.
+
+main.C, btree_driver.C, keys: these are the test driver
+
+results: results of running the test driver using a correct implementation
