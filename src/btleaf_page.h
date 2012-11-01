@@ -14,6 +14,8 @@
 #include "btindex_page.h"
 
 
+// Define your error code for index page here
+enum btLeafErrCodes  {LEAFNOMORERECS=919, LEAF_INSERT_FAILED, GET_DATA_RID_FAILED, DELETE_KEY_FAILED};
 
 class BTLeafPage : public SortedPage {
   
@@ -73,6 +75,10 @@ class BTLeafPage : public SortedPage {
 // is the rid of the DATA record, and NOT the rid of the data entry!
 
    Status get_data_rid(void *key, AttrType attrtype, RID & dataRid);
+
+// ------------------- OPTIONAL: deletekey ------------------------
+// // this is optional, and is only needed if you want to do full deletion
+	Status deleteKey(const RID& );
 
 };
 

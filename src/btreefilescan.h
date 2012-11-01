@@ -27,7 +27,6 @@ public:
     // destructor
     ~BTreeFileScan();
 private:
-
 };
 
 #endif

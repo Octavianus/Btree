@@ -15,7 +15,7 @@
 #include "bt.h"
 
 // Define your error code for B+ tree here
-// enum btErrCodes  {...}
+enum btErrCodes  {FILENOTFOUND = 121, HPAGENOTFOUND, HPAGEPINERR, BTREE_INIT_FAILED, BTREE_DELETE_FAILED};
 
 class BTreeFile: public IndexFile
 {
@@ -36,11 +36,15 @@ class BTreeFile: public IndexFile
     
     Status insert(const void *key, const RID rid);
     // insert <key,rid> into appropriate leaf page
+
+	Status insertrecur(PageId nodeid, const void *key, const RID rid, void **splitkey, PageId& splitpgid);
     
     Status Delete(const void *key, const RID rid);
     // delete leaf entry <key,rid> from the appropriate leaf
     // you need not implement merging of pages when occupancy
     // falls below the minimum threshold (unless you want extra credit!)
+	
+	Status Deleterecur(PageId pageno, const void *key, const RID rid);
     
     IndexFileScan *new_scan(const void *lo_key = NULL, const void *hi_key = NULL);
     // create a scan with given keys
@@ -56,10 +60,22 @@ class BTreeFile: public IndexFile
     //      (5) lo_key!= NULL, hi_key!= NULL, lo_key < hi_key
     //              range scan from lo_key to hi_key
 
-    int keysize();
-    
+    int keysize() {
+   		return bthead->keysize; 
+	}
   private:
+	struct BTreeHeaderPage 
+	{
+		PageId root;
+		AttrType key_type;
+		int keysize;
+	};
 
+	typedef struct BTreeHeaderPage BTreeheader;
+	BTreeheader *bthead;
+	const char *filename;
+	int pincount;
+	int unpincount;
 };
 
 #endif

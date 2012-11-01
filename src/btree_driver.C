@@ -129,7 +129,7 @@ void BTreeTest::test1() {
 
 
     // test insert()
-    num = 2000;
+    num = 2220;
     
 struct dummy{
 RID r;
@@ -250,7 +250,6 @@ int key;
     }
 
     delete scan;
-
     delete btf;
 
     cout << "\n---------------End of Test 1----------------------\n\n";

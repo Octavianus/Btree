@@ -14,7 +14,7 @@
 #include <string.h>
 
 // Define your error code for index page here
-// enum btIndexErrCodes  {...}
+enum btIndexErrCodes  {INDEX_INSERT_FAILED=121, INDEXNOMORERECS, GET_PAGE_NO_FAILED, GET_FIRST_FAILED, GET_NEXT_FAILED};
 
 class BTIndexPage : public SortedPage {
  private:
@@ -39,7 +39,7 @@ class BTIndexPage : public SortedPage {
 
 // ------------------- OPTIONAL: deletekey ------------------------
 // this is optional, and is only needed if you want to do full deletion
-   Status deleteKey(const void *key, AttrType key_type, RID& curRid);
+   Status deleteKey(RID& curRid);
 
 // ------------------ get_page_no -----------------------
 // This function encapsulates the search routine to search a
@@ -72,7 +72,6 @@ class BTIndexPage : public SortedPage {
    PageId getLeftLink(void) { return getPrevPage(); }
    void   setLeftLink(PageId left) { setPrevPage(left); }
 
-    
    // The remaining functions of SortedPage are still visible.
 };
 
