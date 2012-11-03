@@ -52,7 +52,8 @@ Status BTIndexPage::get_page_no(const void *key,
 {
 	Page *page;
 	RID rid;
-	void *tmp_key;
+	Keytype tmp_key;
+	Keytype first_tmp_key;
 	PageId tmp_pageno;
 	Status st;
 
@@ -63,66 +64,52 @@ Status BTIndexPage::get_page_no(const void *key,
 	}
 
 	// If key is less than the first key, return pageNo of the first record
-	if ( OK != this->get_first(rid,tmp_key,tmp_pageno))
+	if ( OK != this->get_first(rid,&tmp_key,tmp_pageno))
 		return MINIBASE_FIRST_ERROR(BTINDEXPAGE, GET_PAGE_NO_FAILED);
 
-	if ( keyCompare(key, tmp_key, key_type) < 0 )
+	if ( keyCompare(key, &tmp_key, key_type) < 0 )
 	{
 		// key < first key; return the pageno of the leftmost link from first rec
 		// recursively search the next
 		pageNo = this->getLeftLink();
 		return OK;
-		#if 0
-		if ( OK != (st=MINIBASE_BM->newPage(pageNo, (Page*&)page)) )
-			return MINIBASE_CHAIN_ERROR(BUFMGR, st);
-		if ( OK != ((BTIndexPage *)page)->get_page_no(key,key_type,pageNo))
-			return MINIBASE_FIRST_ERROR(BTINDEXPAGE, GET_PAGE_NO_FAILED);
-		if ( OK != (st=MINIBASE_BM->unpinPage(pageNo)) )
-			return MINIBASE_CHAIN_ERROR(BUFMGR, st);		
-		#endif
 	}
 	else
 	{
 		// keep looking for a key' such that
 		// key' <= key < key''	
-		
+			
+		int cond1 = 0;
+		int cond2 = 0;	
+		first_tmp_key = tmp_key;        // save the first
+		PageId first_tmp_pageno = tmp_pageno; // save the first
 		// compare the key with the last record
-		do
-		{
-			if ( (keyCompare(tmp_key, key, key_type) < 0) || (keyCompare(tmp_key, key, key_type) == 0) )
+		for ( int i=0; i < ((SortedPage*)this)->numberOfRecords(); ++i)	
+		{			
+			this->get_next(rid,&tmp_key,tmp_pageno); // second			
+
+			if ( (keyCompare(&first_tmp_key, key, key_type) < 0) || (keyCompare(&first_tmp_key, key, key_type) == 0) )
+				cond1 = 1; // key' <= key
+			
+			if ( keyCompare(key, &tmp_key, key_type) < 0 )
+				cond2 = 1; // key < key''
+	
+			if ( cond1 && cond2 )
 			{
-				void *sec_tmp_key;
-				PageId sec_tmp_pageno;
-				if ( OK == this->get_next(rid,sec_tmp_key,sec_tmp_pageno) )
-				{
-					if ( keyCompare(key, sec_tmp_key, key_type) < 0 )
-					{
-						pageNo = tmp_pageno;
-						return OK;
-						#if 0
-						if ( OK != (st=MINIBASE_BM->newPage(pageNo, (Page*&)page)) )
-							return MINIBASE_CHAIN_ERROR(BUFMGR, st);
-						if ( OK != ((BTIndexPage *)page)->get_page_no(key,key_type,pageNo))
-							return MINIBASE_FIRST_ERROR(BTINDEXPAGE, GET_PAGE_NO_FAILED);
-						if ( OK != (st=MINIBASE_BM->unpinPage(pageNo)) )
-							return MINIBASE_CHAIN_ERROR(BUFMGR, st);						
-						#endif
-					}
-				}				
-			}
-		}while ( OK != this->get_next(rid,tmp_key,tmp_pageno) );
+					pageNo = first_tmp_pageno;
+					return OK;
+			}				
+		
+			// set this to first for the next round
+			first_tmp_key = tmp_key; 
+			first_tmp_pageno = tmp_pageno;				
+			cond1 = 0;
+			cond2 = 0;
+		}
 	
 		// we ran out of records on this page. Use the last pageno
 		pageNo = tmp_pageno;
 		return OK;
-		#if 0
-		if ( OK != (st=MINIBASE_BM->newPage(pageNo, (Page*&)page)) )
-			return MINIBASE_CHAIN_ERROR(BUFMGR, st);
-		if ( OK != ((BTIndexPage *)page)->get_page_no(key,key_type,pageNo))
-			return MINIBASE_FIRST_ERROR(BTINDEXPAGE, GET_PAGE_NO_FAILED);
-		if ( OK != (st=MINIBASE_BM->unpinPage(pageNo)) )
-			return MINIBASE_CHAIN_ERROR(BUFMGR, st);				
-		#endif
 	}
    
 	return MINIBASE_FIRST_ERROR(BTINDEXPAGE, GET_PAGE_NO_FAILED);					

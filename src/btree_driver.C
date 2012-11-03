@@ -129,7 +129,7 @@ void BTreeTest::test1() {
 
 
     // test insert()
-    num = 2220;
+    num = 2000;
     
 struct dummy{
 RID r;
@@ -156,7 +156,6 @@ int key;
     }
 
     // test delete()
-
     cout << "\nstart BTreeIndex deletion" << endl << endl;
     int j = 0;
     for (i = 0; i < num; i++) {
@@ -172,7 +171,6 @@ int key;
     }
 
     delete btf;
-
     btf = new BTreeFile(status, "BTreeIndex");
     if(status == OK)
 	cout<<"\n BTreeIndex opened successfully." << endl << endl;

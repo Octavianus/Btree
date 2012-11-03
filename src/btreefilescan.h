@@ -27,6 +27,14 @@ public:
     // destructor
     ~BTreeFileScan();
 private:
+    RID currentRid;	
+	RID nextrid;
+    int key_size;
+	AttrType ktype;
+    PageId currentpage;
+    const void *lo_key;
+    const void *hi_key;
+
 };
 
 #endif

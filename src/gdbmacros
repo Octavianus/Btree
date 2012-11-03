@@ -1,0 +1,19 @@
+define printleaf
+  set $first = ((SortedPage *)$arg0)
+  set $start = 0
+  while $start < $arg0->slotCnt
+    p (int)$first->data[$first->slot[$start].offset]
+    p (RID)($first->data[$first->slot[$start].offset+4])
+    set ++$start
+  end
+  end
+
+define printindex
+  set $first = ((SortedPage *)$arg0)
+  set $start = 0
+  while $start < $arg0->slotCnt
+    p (int)$first->data[$first->slot[$start].offset]
+    p (PageId)($first->data[$first->slot[$start].offset+4])
+    set ++$start
+  end
+end

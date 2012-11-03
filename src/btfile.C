@@ -135,6 +135,9 @@ Status BTreeFile::insert(const void *key, const RID rid)
 		if ( OK != (st=indexpage->insertKey(*splitkey,bthead->key_type,splitpgid,indexpage_rid)) )
 			return MINIBASE_CHAIN_ERROR(BTINDEXPAGE, st);    	
 		
+        if ( OK != (st = MINIBASE_BM->unpinPage(root_id, TRUE)) )
+            return MINIBASE_CHAIN_ERROR(BUFMGR, st);
+	
 		*splitkey  = NULL;
 		splitpgid = INVALID_PAGE;
 		bthead->root = root_id;
@@ -173,7 +176,7 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
 
 		++unpincount;
         // Unpin this page before recursing.
-		if ( OK != (st = MINIBASE_BM->unpinPage(pageno)) )
+		if ( OK != (st = MINIBASE_BM->unpinPage(pageno,TRUE)) )
            	return MINIBASE_CHAIN_ERROR(BUFMGR, st);
 
 		// insert key-val pair into this page
@@ -182,7 +185,11 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
 
 		// did not split child	
 		if ( *splitkey == NULL && splitpgid == INVALID_PAGE)
+		{
+	      // if ( OK != (st = MINIBASE_BM->unpinPage(pageno,TRUE)) )
+    	  //      return MINIBASE_CHAIN_ERROR(BUFMGR, st);
 			return OK;
+		}
 
 		// We split the child entry.  
 	    RID temprid;
@@ -196,6 +203,8 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
         {
 			*splitkey = NULL;
 			splitpgid = INVALID_PAGE;
+            //if ( OK != (st = MINIBASE_BM->unpinPage(pageno,TRUE)) )
+            //    return MINIBASE_CHAIN_ERROR(BUFMGR, st);
 			return OK;
 		}
 
@@ -226,7 +235,7 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
             if (key_type == attrString)
                 temp_key = new char[MAX_KEY_SIZE1];
 
-			// index interface should return first key-ptr. Leftmost will be copied using getleftlink.
+			// index interface should return first key-ptr. Leftmost will be copied using getLeftLink.
             if ( OK != (st = indexpage->get_first(temp_rid, temp_key, temp_pageid)) )
                 return MINIBASE_CHAIN_ERROR(BTINDEXPAGE, st);
 
@@ -314,7 +323,7 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
 			*splitkey =  NULL;
 			splitpgid = INVALID_PAGE;
         	// Unpin this page before recursing.
-			if ( OK != (st = MINIBASE_BM->unpinPage(pageno)) )
+			if ( OK != (st = MINIBASE_BM->unpinPage(pageno, TRUE)) )
            		return MINIBASE_CHAIN_ERROR(BUFMGR, st);
         
            return OK;
@@ -369,10 +378,7 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
             	// this value needs to be copied to parent
 	            if ( temp_count == countrid/2 )
 			    {
-					int tmpkey = *(int*)temp_key;
-					splitpgid = newpgid;
-				
-					if ( *(int*)key >= tmpkey )
+					if (  (keyCompare(key, temp_key, key_type) > 0) || (keyCompare(key, temp_key, key_type) == 0) )
 						flag = 1;
 				}
 		
@@ -398,7 +404,7 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
 			    if ( OK != (st = leafpage->insertRec(key, key_type, rid, leafpage_rid)) )
     	            return MINIBASE_CHAIN_ERROR(BTLEAFPAGE, st);
 			}
-			else
+			if ( flag == 1 )	
 			{
               	if ( OK != (st = newleafpage->insertRec(key, key_type, rid, newleafpage_rid)) )
                   	return MINIBASE_CHAIN_ERROR(BTLEAFPAGE, st);
@@ -417,6 +423,7 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
                 return MINIBASE_CHAIN_ERROR(BTLEAFPAGE, st);
 	
 			*splitkey = temp_key;
+			splitpgid = newpgid;
 
 			++unpincount;
 			// Unpin this page before recursing.
@@ -469,7 +476,7 @@ Status BTreeFile::Deleterecur(PageId pageno, const void *key, const RID rid)
             return MINIBASE_CHAIN_ERROR(BTINDEXPAGE, st);
 
         // unpin before we recurse
-        if ( OK != (st=MINIBASE_BM->unpinPage(pageno)) )
+        if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
             return MINIBASE_CHAIN_ERROR(BUFMGR, st);
 
         if ( OK != (st=this->Deleterecur(searchpage,key,rid)) )
@@ -490,7 +497,7 @@ Status BTreeFile::Deleterecur(PageId pageno, const void *key, const RID rid)
 	
 		for (int i=0; i < leafpage->numberOfRecords(); ++i)
 		{	 
-			if ( *(int*)temp_key == *(int*)key )
+			if (  (keyCompare(temp_key, key, bthead->key_type) == 0) )
 			{	
 				if ( OK != (st = leafpage->deleteKey(leafpage_rid)) )
 					return MINIBASE_CHAIN_ERROR(BTLEAFPAGE, st);
@@ -504,7 +511,8 @@ Status BTreeFile::Deleterecur(PageId pageno, const void *key, const RID rid)
         if ( OK != (st=MINIBASE_BM->unpinPage(pageno, TRUE)) )
             return MINIBASE_CHAIN_ERROR(BUFMGR, st);
 	
-		return OK;
+		// Did not find the record in this page ?? 
+		return MINIBASE_FIRST_ERROR(BTINDEXPAGE, BTREE_DELETE_FAILED);
 	}
 	return MINIBASE_FIRST_ERROR(BTINDEXPAGE, BTREE_DELETE_FAILED);
 
@@ -514,16 +522,11 @@ IndexFileScan *BTreeFile::new_scan(const void *lo_key, const void *hi_key)
 {
 	Status st;
 	Page *page;
-	PageId pageno;
-	IndexFileScan *scanner = NULL;
-	void *key;
+	PageId pageno = bthead->root;
+	BTreeFileScan *scanner = new BTreeFileScan();
+	Keytype key;
+	AttrType key_type = bthead->key_type;	
 	
-    if (bthead->key_type == attrInteger)
-       key = new int;
-    if (bthead->key_type == attrString)
-        key = new char[MAX_KEY_SIZE1];
-
-
 	if ( bthead->root == INVALID_PAGE )
 		return scanner;
 
@@ -537,22 +540,23 @@ IndexFileScan *BTreeFile::new_scan(const void *lo_key, const void *hi_key)
 		// return the first leaf page
 		if ( OK != (st=MINIBASE_BM->pinPage(bthead->root, (Page*&) page)) )
  			return scanner;
-
+		
 		pageno = bthead->root;
 		if ( ((SortedPage *)page)->get_type() == INDEX )
 		{
-			BTIndexPage *index = (BTIndexPage*)page;
+			PageId temp;
 
 			while ( ((SortedPage *)page)->get_type() == INDEX )
 			{
-				if ( OK != index->get_first(rid,(void*)key,pageno) )
+				BTIndexPage *index = (BTIndexPage*)page;
+
+				if ( INVALID_PAGE == (temp = index->getLeftLink()) )
 					return scanner;
 		    
-				++unpincount;
-			    if ( OK != (st=MINIBASE_BM->unpinPage(pageno)) )
+			    if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
     		        return scanner;
-	
-				++pincount;
+				
+				pageno = temp;
 				if ( OK != (st=MINIBASE_BM->pinPage(pageno, (Page*&) page)) )
 					return scanner;
 			}
@@ -565,15 +569,20 @@ IndexFileScan *BTreeFile::new_scan(const void *lo_key, const void *hi_key)
 
 		BTLeafPage *leaf = (BTLeafPage *)page;
 		// Point to the first record 
-		if ( OK != (st=leaf->get_first(rid,key,datarid)) )
+		if ( OK != (st=leaf->get_first(rid,&key,datarid)) )
 			return scanner;							
 
-		scanner = (IndexFileScan *)leaf;
 		scanner->currentRid = rid;
+		scanner->nextrid	= rid;
 		scanner->currentpage = pageno;
 		scanner->lo_key = lo_key;
 		scanner->hi_key = hi_key;
 		scanner->key_size = bthead->keysize;
+		scanner->ktype = bthead->key_type;
+
+        if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
+            return scanner;
+
 		return scanner;
 	}
 
@@ -582,7 +591,6 @@ IndexFileScan *BTreeFile::new_scan(const void *lo_key, const void *hi_key)
 	{
 		RID rid;
 		
-		++pincount;
 		// return the first leaf page
 		if ( OK != (st=MINIBASE_BM->pinPage(bthead->root, (Page*&) page)) )
  			return scanner;
@@ -591,18 +599,19 @@ IndexFileScan *BTreeFile::new_scan(const void *lo_key, const void *hi_key)
 
         if ( ((SortedPage *)page)->get_type() == INDEX )
         {
-            BTIndexPage *index = (BTIndexPage*)page;
+            PageId temp;
 
             while ( ((SortedPage *)page)->get_type() == INDEX )
             {
-                if ( OK != index->get_first(rid,key,pageno) )
+                BTIndexPage *index = (BTIndexPage*)page;
+
+                if ( INVALID_PAGE == (temp = index->getLeftLink()) )
                     return scanner;
 
-				++unpincount;
-		        if ( OK != (st=MINIBASE_BM->unpinPage(pageno)) )
-		            return scanner;
+                if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
+                    return scanner;
 
-				++pincount;
+                pageno = temp;
                 if ( OK != (st=MINIBASE_BM->pinPage(pageno, (Page*&) page)) )
                     return scanner;
             }
@@ -615,15 +624,20 @@ IndexFileScan *BTreeFile::new_scan(const void *lo_key, const void *hi_key)
 
 		BTLeafPage *leaf = (BTLeafPage *)page;
 		// Point to the first record 
-		if ( OK != (st=leaf->get_first(rid,key,datarid)) )
+		if ( OK != (st=leaf->get_first(rid,&key,datarid)) )
 			return scanner;							
 
-		scanner = (IndexFileScan *)leaf;
 		scanner->currentRid = rid;
+		scanner->nextrid    = rid;
 		scanner->currentpage = pageno;
 		scanner->lo_key = lo_key;
 		scanner->hi_key = hi_key;
 		scanner->key_size = bthead->keysize;
+		scanner->ktype = bthead->key_type;
+
+        if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
+            return scanner;
+
 		return scanner;
 	}
 
@@ -631,9 +645,7 @@ IndexFileScan *BTreeFile::new_scan(const void *lo_key, const void *hi_key)
 	if ( lo_key != NULL && hi_key == NULL )
 	{
         RID rid;
-		Page *page;
 
-		++pincount;
         // return the first leaf page
         if ( OK != (st=MINIBASE_BM->pinPage(bthead->root, (Page*&) page)) )
             return scanner;
@@ -642,21 +654,24 @@ IndexFileScan *BTreeFile::new_scan(const void *lo_key, const void *hi_key)
 
         if ( ((SortedPage *)page)->get_type() == INDEX )
         {
-            BTIndexPage *index = (BTIndexPage*)page;
+            PageId temp;
 
-        	// return the lo_key leaf page
-	        if ( OK != (st=index->get_page_no(lo_key,bthead->key_type,pageno)) )
-    	        return scanner;
-		
-			++unpincount;
-	        if ( OK != (st=MINIBASE_BM->unpinPage(pageno)) )
-    	        return scanner;
+            while ( ((SortedPage *)page)->get_type() == INDEX )
+            {
+                BTIndexPage *index = (BTIndexPage*)page;
 
-			++pincount;
-	        // pin the leaf page
-    	    if ( OK != (st=MINIBASE_BM->pinPage(pageno, (Page*&) page)) )
-        	    return scanner;
+                if ( INVALID_PAGE == (temp = index->getLeftLink()) )
+                    return scanner;
+
+                if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
+                    return scanner;
+
+                pageno = temp;
+                if ( OK != (st=MINIBASE_BM->pinPage(pageno, (Page*&) page)) )
+                    return scanner;
+            }
         }
+		
 
         RID datarid;
 
@@ -664,25 +679,55 @@ IndexFileScan *BTreeFile::new_scan(const void *lo_key, const void *hi_key)
             return scanner;
 
         BTLeafPage *leaf = (BTLeafPage *)page;
-
-        if ( OK != (st=leaf->get_first(rid,key,datarid)) )
+		
+        if ( OK != (st=leaf->get_first(rid,&key,datarid)) )
             return scanner;
-		while( lo_key < key )
-			if ( OK != (st=leaf->get_next(rid,key,datarid)) )
-				 return scanner;
+			
+		cout << "Case 3: Before the loop" << endl;
+		while( keyCompare(&key,lo_key,key_type) < 0 )
+		{
+			cout << "key "<<key.intkey<<"lo_key" <<*(int*)lo_key<<endl;
+			if ( OK != (st=leaf->get_next(rid,&key,datarid)) )
+			{
+				// get next leaf level page before unpinning.
+				PageId temp = ((HFPage*)page)->getNextPage();
 
-        scanner = (IndexFileScan *)leaf;
+				//rid not found in the first leaf. continue searching.
+                if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
+                    return scanner;
+			
+				if ( temp == INVALID_PAGE )
+				{
+					scanner->currentpage = INVALID_PAGE;
+					return scanner;
+				}
+
+				pageno = temp;
+
+				if ( OK != (st=MINIBASE_BM->pinPage(pageno, (Page*&) page)) )
+                    return scanner;
+				
+				leaf = (BTLeafPage *)page;
+		        if ( OK != (st=leaf->get_first(rid,&key,datarid)) )
+    		        return scanner;
+			}
+		}
+
         scanner->currentRid = rid;
+		scanner->nextrid    = rid;
 		scanner->currentpage = pageno;
         scanner->lo_key = lo_key;
         scanner->hi_key = hi_key;
 		scanner->key_size = bthead->keysize;
+		scanner->ktype = bthead->key_type;
+        if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
+            return scanner;
         return scanner;
 		
 	}
 
 	// Case 4: exact match ( might not unique)
-	if ( (lo_key != NULL) && (hi_key != NULL) && (lo_key == hi_key) )
+	if ( (lo_key != NULL) && (hi_key != NULL) && (keyCompare(lo_key,hi_key,key_type) == 0) )
 	{
         RID rid;
         Page *page;
@@ -703,7 +748,7 @@ IndexFileScan *BTreeFile::new_scan(const void *lo_key, const void *hi_key)
                 return scanner;
 
 			++unpincount;
-	        if ( OK != (st=MINIBASE_BM->unpinPage(pageno)) )
+	        if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
 	            return scanner;
 
 			++pincount;
@@ -719,27 +764,56 @@ IndexFileScan *BTreeFile::new_scan(const void *lo_key, const void *hi_key)
 
         BTLeafPage *leaf = (BTLeafPage *)page;
 
-        if ( OK != (st=leaf->get_first(rid,key,datarid)) )
+        if ( OK != (st=leaf->get_first(rid,&key,datarid)) )
             return scanner;
-        while( lo_key < key )
-            if ( OK != (st=leaf->get_next(rid,key,datarid)) )
-                 return scanner;
 
-        scanner = (IndexFileScan *)leaf;
+		cout << "Case 4: Before the loop" << endl;
+        while( keyCompare(&key,lo_key,key_type) < 0 )
+        {
+			cout << "key "<<key.intkey<<"lo_key" <<*(int*)lo_key<<endl;
+            if ( OK != (st=leaf->get_next(rid,&key,datarid)) )
+            {
+                // get next leaf level page before unpinning.
+                PageId temp = ((HFPage*)page)->getNextPage();
+
+                //rid not found in the first leaf. continue searching.
+                if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
+                    return scanner;
+
+                if ( temp == INVALID_PAGE )
+                {
+                    scanner->currentpage = INVALID_PAGE;
+                    return scanner;
+                }
+
+                pageno = temp;
+
+                if ( OK != (st=MINIBASE_BM->pinPage(pageno, (Page*&) page)) )
+                    return scanner;
+
+                leaf = (BTLeafPage *)page;
+                if ( OK != (st=leaf->get_first(rid,&key,datarid)) )
+                    return scanner;
+            }
+        }
+
         scanner->currentRid = rid;
+		scanner->nextrid    = rid;
         scanner->currentpage = pageno;
 		scanner->lo_key = lo_key;
 		scanner->hi_key = hi_key;
 		scanner->key_size = bthead->keysize;
+		scanner->ktype = bthead->key_type;
+        if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
+            return scanner;
 		return scanner;
 	}
  	// Case 5: range scan from lo_key to hi_key
-	if ( (lo_key != NULL) && (hi_key != NULL) && (lo_key < hi_key) )
+	if ( (lo_key != NULL) && (hi_key != NULL) && (keyCompare(lo_key,hi_key,key_type) < 0) )
 	{
         RID rid;
         Page *page;
 
-		++pincount;
         // return the first leaf page
         if ( OK != (st=MINIBASE_BM->pinPage(bthead->root, (Page*&) page)) )
             return scanner;
@@ -755,7 +829,7 @@ IndexFileScan *BTreeFile::new_scan(const void *lo_key, const void *hi_key)
                 return scanner;
 
 			++unpincount;
-    	    if ( OK != (st=MINIBASE_BM->unpinPage(pageno)) )
+    	    if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
 	            return scanner;
 				
 			++pincount;
@@ -771,18 +845,49 @@ IndexFileScan *BTreeFile::new_scan(const void *lo_key, const void *hi_key)
 
         BTLeafPage *leaf = (BTLeafPage *)page;
 
-        if ( OK != (st=leaf->get_first(rid,key,datarid)) )
+        if ( OK != (st=leaf->get_first(rid,&key,datarid)) )
             return scanner;
-        while( lo_key < key )
-            if ( OK != (st=leaf->get_next(rid,key,datarid)) )
-                 return scanner;
 
-        scanner = (IndexFileScan *)leaf;
+		cout << "Case 5: Before the loop" << endl;
+
+        while( keyCompare(&key,lo_key,key_type) < 0 )
+        {
+			cout << "key "<<key.intkey<<"lo_key" <<*(int*)lo_key<<endl;
+            if ( OK != (st=leaf->get_next(rid,&key,datarid)) )
+            {
+                // get next leaf level page before unpinning.
+                PageId temp = ((HFPage*)page)->getNextPage();
+
+                //rid not found in the first leaf. continue searching.
+                if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
+                    return scanner;
+ 
+                if ( temp == INVALID_PAGE )
+                {
+                    scanner->currentpage = INVALID_PAGE;
+                    return scanner;
+                }
+
+                pageno = temp;
+
+                if ( OK != (st=MINIBASE_BM->pinPage(pageno, (Page*&) page)) )
+                    return scanner;
+
+                leaf = (BTLeafPage *)page;
+                if ( OK != (st=leaf->get_first(rid,&key,datarid)) )
+                    return scanner;
+            }
+        }
+
         scanner->currentRid = rid;
+		scanner->nextrid    = rid;
         scanner->currentpage = pageno;
 		scanner->lo_key = lo_key;
 		scanner->hi_key = hi_key;
 		scanner->key_size = bthead->keysize;
+		scanner->ktype = bthead->key_type;
+        if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
+            return scanner;
 		return scanner;
 	}
 	return scanner;		
