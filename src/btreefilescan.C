@@ -38,6 +38,9 @@ Status BTreeFileScan::get_next (RID & rid, void* keyptr)
 
 	currentRid = nextrid;
 
+	if ( this->valid == 0 )
+		return DONE;
+
 	if ( currentpage == INVALID_PAGE )
 		return DONE;
 
@@ -216,7 +219,7 @@ Status BTreeFileScan::get_next (RID & rid, void* keyptr)
         rid = dt->rid;
 
         // Stop if currentRid's key != lo_key or hi_key
-        if ( keyCompare(keyptr,hi_key,this->ktype) > 0 )
+        if ( (keyCompare(keyptr,hi_key,this->ktype) < 0) || (keyCompare(keyptr,hi_key,this->ktype) > 0) )
             return DONE;
 
         // Get the rid of the next record
@@ -267,7 +270,7 @@ Status BTreeFileScan::get_next (RID & rid, void* keyptr)
         rid = dt->rid;
 
         // Stop if currentRid's key > hi_key
-        if ( keyCompare(keyptr,hi_key,this->ktype) > 0 )
+        if ( keyCompare(keyptr,hi_key,this->ktype) > 0 ) 
             return DONE;
 
         // Get the rid of the next record
@@ -302,52 +305,34 @@ Status BTreeFileScan::get_next (RID & rid, void* keyptr)
         }
         return OK;
     }
- 
+
 }
 
 Status BTreeFileScan::delete_current ()
 {
 	Page *page;
+	PageId temp;
 	
 	// If we are on the same page. Do this.
 	if ( currentRid.pageNo == nextrid.pageNo )
+	{
 		nextrid = currentRid;
+		temp = currentpage;
+	}
+	else
+	{
+		temp = currentRid.pageNo;
+	}
+	
 	Status st;
 
-	if ( OK != (st=MINIBASE_BM->pinPage(currentpage, (Page*&) page)) )
+	if ( OK != (st=MINIBASE_BM->pinPage(temp, (Page*&) page)) )
         return MINIBASE_CHAIN_ERROR(BUFMGR,st);
-#if 0
-    // point currentRid to the next record.
-    if ( OK != (st=((HFPage *)page)->nextRecord(temp, currentRid)) )
-    {
-			cout << "Deletion: pageNo: "<<temp.pageNo<<"slotNo: "<<temp.slotNo<< endl;
-            PageId temppage = currentpage;
-
-            // we exhausted the entries on this page. Get the next page.
-            if ( INVALID_PAGE == (currentpage = ((HFPage *)page)->getNextPage()) )
-                return DONE;
-
-            // Unpin current page
-            if ( OK != (st=MINIBASE_BM->unpinPage(temppage, TRUE)) )
-                return MINIBASE_CHAIN_ERROR(BUFMGR,st);
-
-            // Pin this page and Update the currentRid to first record.
-            if ( OK != (st=MINIBASE_BM->pinPage(currentpage, (Page*&) page)) )
-                return MINIBASE_CHAIN_ERROR(BUFMGR,st);
-
-            if ( OK != ((HFPage *)page)->firstRecord(currentRid) )
-                return MINIBASE_CHAIN_ERROR(BUFMGR,st);
-
-            // Unpin current page
-            if ( OK != (st=MINIBASE_BM->unpinPage(currentpage, TRUE)) )
-                return MINIBASE_CHAIN_ERROR(BUFMGR,st);
-
-	}			
-#endif
+	
 	if ( OK != (st=((SortedPage *)page)->deleteRecord(currentRid)) ) 
 		return MINIBASE_CHAIN_ERROR(SORTEDPAGE, st);
 
-    if ( OK != (st=MINIBASE_BM->unpinPage(currentpage, TRUE)) )
+    if ( OK != (st=MINIBASE_BM->unpinPage(temp, TRUE)) )
         return MINIBASE_CHAIN_ERROR(BUFMGR,st);
 	
 }	

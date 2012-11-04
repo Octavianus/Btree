@@ -86,12 +86,13 @@ Status BTIndexPage::get_page_no(const void *key,
 		// compare the key with the last record
 		for ( int i=0; i < ((SortedPage*)this)->numberOfRecords(); ++i)	
 		{			
-			this->get_next(rid,&tmp_key,tmp_pageno); // second			
-
+			if ( OK != this->get_next(rid,&tmp_key,tmp_pageno) ) // second			
+				break;
+					
 			if ( (keyCompare(&first_tmp_key, key, key_type) < 0) || (keyCompare(&first_tmp_key, key, key_type) == 0) )
 				cond1 = 1; // key' <= key
 			
-			if ( keyCompare(key, &tmp_key, key_type) < 0 )
+			if ( (keyCompare(key, &tmp_key, key_type) < 0) || (keyCompare(key, &tmp_key, key_type) == 0) )
 				cond2 = 1; // key < key''
 	
 			if ( cond1 && cond2 )
@@ -108,7 +109,7 @@ Status BTIndexPage::get_page_no(const void *key,
 		}
 	
 		// we ran out of records on this page. Use the last pageno
-		pageNo = tmp_pageno;
+		pageNo = first_tmp_pageno;
 		return OK;
 	}
    
@@ -153,8 +154,10 @@ Status BTIndexPage::get_next(RID& rid, void *key, PageId & pageNo)
 
     // Get the rid of the next record
     if ( OK != (((HFPage*)this)->nextRecord(rid, nextRid)) )
-        if ( st == DONE)
-            return MINIBASE_FIRST_ERROR(BTLEAFPAGE, INDEXNOMORERECS);
+	{
+		pageNo = INVALID_PAGE;
+		return DONE;
+	}
 
     // Pointer of the record from page
     if ( OK != (((HFPage*)this)->returnRecord(nextRid, recptr, reclen)) )

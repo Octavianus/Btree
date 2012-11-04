@@ -34,7 +34,7 @@ private:
     PageId currentpage;
     const void *lo_key;
     const void *hi_key;
-
+	int valid;
 };
 
 #endif

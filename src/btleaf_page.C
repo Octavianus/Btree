@@ -99,9 +99,8 @@ Status BTLeafPage::get_next (RID& rid,
 	dt->rid = dataRid;
 
     // Get the rid of the next record
-    if ( OK != (((HFPage*)this)->nextRecord(rid, nextRid)) )
-    	if ( st == DONE)
-        	return MINIBASE_FIRST_ERROR(BTLEAFPAGE, LEAFNOMORERECS);
+    if ( OK != (st=((HFPage*)this)->nextRecord(rid, nextRid)) )
+		return DONE;
 
     // Pointer of the record from page
     if ( OK != (((HFPage*)this)->returnRecord(nextRid, recptr, reclen)) )

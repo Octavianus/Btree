@@ -15,7 +15,7 @@
 #include "bt.h"
 
 // Define your error code for B+ tree here
-enum btErrCodes  {FILENOTFOUND = 121, HPAGENOTFOUND, HPAGEPINERR, BTREE_INIT_FAILED, BTREE_DELETE_FAILED};
+enum btErrCodes  {FILENOTFOUND = 121, HPAGENOTFOUND, HPAGEPINERR, BTREE_INIT_FAILED, BTREE_DELETE_FAILED, DESTROY_FAILED};
 
 class BTreeFile: public IndexFile
 {
@@ -33,6 +33,8 @@ class BTreeFile: public IndexFile
     
     Status destroyFile();
     // destroy entire index file, including the header page and the file entry
+
+	Status destroyFilerecur(PageId);
     
     Status insert(const void *key, const RID rid);
     // insert <key,rid> into appropriate leaf page
