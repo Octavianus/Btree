@@ -69,9 +69,11 @@ BTreeFile::BTreeFile (Status& returnStatus, const char *filename,
 
 BTreeFile::~BTreeFile ()
 {
-//The destructor of BTreeFile just "closes" the index. This includes unpinning any pages that are being pinned. Note that it does not delete the file.
-
+	PageId header_page;
 	// Unpin all the pages in the tree 
+    MINIBASE_DB->get_file_entry(filename, header_page); 
+
+    MINIBASE_BM->unpinPage(header_page,TRUE); 
 		
 }	
 
@@ -137,6 +139,10 @@ Status BTreeFile::destroyFile ()
 
 	if ( OK != (st=MINIBASE_BM->freePage(pageno)) )	
 		return MINIBASE_CHAIN_ERROR(BUFMGR, st);
+
+	// free the header page too!
+	if ( OK != MINIBASE_DB->get_file_entry(filename, header_page) )	
+		return MINIBASE_CHAIN_ERROR(DBMGR, st);
 
 	// free the header page too!
 	if ( OK != MINIBASE_DB->get_file_entry(filename, header_page) )	
@@ -328,21 +334,27 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
     	  //      return MINIBASE_CHAIN_ERROR(BUFMGR, st);
 			return OK;
 		}
+	   
+        // Pin the nodeid page
+		if ( OK != (st = MINIBASE_BM->pinPage(pageno, (Page*&)page)) )
+			return MINIBASE_CHAIN_ERROR(BUFMGR, st);
 
+		indexpage = (BTIndexPage*)page;
 		// We split the child entry.  
 	    RID temprid;
 
         // insert the newchildentry
-        if ( OK != (st = indexpage->insertKey(*splitkey, bthead->key_type, splitpgid, temprid)) )
-             return MINIBASE_CHAIN_ERROR(BTINDEXPAGE, st);      
+        st = indexpage->insertKey(*splitkey, bthead->key_type, splitpgid, temprid);
 
     	// found space for rec? we're done.
     	if ( st == OK )
         {
 			*splitkey = NULL;
 			splitpgid = INVALID_PAGE;
-            //if ( OK != (st = MINIBASE_BM->unpinPage(pageno,TRUE)) )
-            //    return MINIBASE_CHAIN_ERROR(BUFMGR, st);
+			if ( OK != (st = MINIBASE_BM->unpinPage(pageno,TRUE)) )
+        	   	return MINIBASE_CHAIN_ERROR(BUFMGR, st);
+
+
 			return OK;
 		}
 
@@ -366,7 +378,7 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
             // Count the rids present.
             PageId temp_pageid;
             RID temp_rid;
-            void *push_key;
+			RID newindex_rid;
 			void *temp_key;
             if (key_type == attrInteger)
                 temp_key = new int;
@@ -379,10 +391,10 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
 
             // flag to indicate record was deleted
             int deleteflag = 0;
-
             int temp_count=1;
 			int countrid = indexpage->numberOfRecords();
-			int pushupkey;
+			PageId leftmost_pageid;
+
             // Go to d+1 entry.
             while ( temp_count < countrid )
             {
@@ -399,9 +411,9 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
                 ++temp_count;
                 if ( temp_count <= countrid/2 )
                     continue;
-
+				
                 // > d+1 entry. start moving this to new page.
-                if ( OK != (st= newindexpage->insertKey(temp_key, key_type, temp_pageid, temp_rid)) )
+                if ( OK != (st= newindexpage->insertKey(temp_key, key_type, temp_pageid, newindex_rid)) )
                     return MINIBASE_CHAIN_ERROR(BTINDEXPAGE, st);
 
                 RID copy_indexpage_rid = temp_rid;
@@ -422,10 +434,29 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
                 deleteflag = 1;
 
 			}
-
+			// redistribution is complete. insert the *splitkey and splitpgid to the correct index page.
+			// compare the first key from newindex page and insert the splitkey and splitpage into correct
+			// indexpage.
+            if ( OK != (st = newindexpage->get_first(temp_rid, temp_key, temp_pageid)) )
+                return MINIBASE_CHAIN_ERROR(BTLEAFPAGE, st);
+ 
+			if ( (keyCompare(*splitkey, temp_key, key_type) < 0) )
+            {
+                if ( OK != (st = indexpage->insertKey(*splitkey, key_type, splitpgid, temp_rid)) )
+                    return MINIBASE_CHAIN_ERROR(BTLEAFPAGE, st);
+            }
+            else
+            {
+                if ( OK != (st = newindexpage->insertKey(*splitkey, key_type, splitpgid, newindex_rid)) )
+                    return MINIBASE_CHAIN_ERROR(BTLEAFPAGE, st);
+            }
+		
 			// Delete the first entry from new page and insert it into parent node.
 	        if ( OK != (st = newindexpage->get_first(temp_rid, temp_key, temp_pageid)) )
                 return MINIBASE_CHAIN_ERROR(BTLEAFPAGE, st);
+
+			// set the left link to the record being deleted
+			newindexpage->setLeftLink(temp_pageid);
 
             if ( OK != (st = newindexpage->deleteKey(temp_rid)) )
                 return MINIBASE_CHAIN_ERROR(BTLEAFPAGE, st);
@@ -507,10 +538,6 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
 	        if ( OK != (st = leafpage->get_first(leafpage_rid, temp_key, temp_rid)) )
     	        return MINIBASE_CHAIN_ERROR(BTLEAFPAGE, st);
 
-			// flag to tell if we need to insert key,val into new page or old page
-			//  assumed to be old by default.
-			int flag = 0;
-
 			// flag to indicate record was deleted
 			int deleteflag = 0;
     	    // Go to d+1 entry.
@@ -529,14 +556,8 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
 		
 	            ++temp_count;
 				
-    	        if ( temp_count < countrid/2 )
+    	        if ( temp_count <= countrid/2 )
         	        continue;
-            	// this value needs to be copied to parent
-	            if ( temp_count == countrid/2 )
-			    {
-					if (  (keyCompare(key, temp_key, key_type) > 0) || (keyCompare(key, temp_key, key_type) == 0) )
-						flag = 1;
-				}
 		
     	    	// >= d+1 entry. start moving this to new page.
         	    if ( OK != (st = newleafpage->insertRec(temp_key, key_type, temp_rid, newleafpage_rid)) )
@@ -559,13 +580,17 @@ Status BTreeFile::insertrecur(PageId pageno, const void *key, const RID rid, voi
 				leafpage_rid = copy_leafpage_rid;
 				deleteflag = 1;
 			}
-			// if flag == 0. Put the new entry into old page	
-			if ( flag == 0 )
+
+            // compare the first key from newpage with given key.
+            if ( OK != (st = newleafpage->get_first(newleafpage_rid, temp_key, temp_rid)) )
+                return MINIBASE_CHAIN_ERROR(BTLEAFPAGE, st);
+
+			if (  (keyCompare(key, temp_key, key_type) < 0) )
 	        {
 			    if ( OK != (st = leafpage->insertRec(key, key_type, rid, leafpage_rid)) )
     	            return MINIBASE_CHAIN_ERROR(BTLEAFPAGE, st);
 			}
-			if ( flag == 1 )	
+			else
 			{
               	if ( OK != (st = newleafpage->insertRec(key, key_type, rid, newleafpage_rid)) )
                   	return MINIBASE_CHAIN_ERROR(BTLEAFPAGE, st);
@@ -985,11 +1010,14 @@ IndexFileScan *BTreeFile::new_scan(const void *lo_key, const void *hi_key)
 		scanner->valid = 1;
         if ( OK != (st=MINIBASE_BM->unpinPage(pageno,TRUE)) )
             return scanner;
+	
 		return scanner;
 	}
- 	// Case 5: range scan from lo_key to hi_key
-	if ( (lo_key != NULL) && (hi_key != NULL) && (keyCompare(lo_key,hi_key,key_type) < 0) )
-	{
+
+    // Case 5: range scan from lo_key to hi_key
+    if ( (lo_key != NULL) && (hi_key != NULL) && (keyCompare(lo_key,hi_key,key_type) < 0) )
+    {
+
         RID rid;
         Page *page;
 

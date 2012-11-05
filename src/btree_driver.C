@@ -129,7 +129,7 @@ void BTreeTest::test1() {
 
 
     // test insert()
-    num = 2000;
+    num = 10000;
     
 struct dummy{
 RID r;
@@ -138,7 +138,7 @@ int key;
 
     cout << "\nstart BTreeIndex insertion" << endl << endl;
 
-    dummy kill[410];
+    dummy kill[1010];
     for (i = 0; i < num; i++) {
         rid.pageNo = i; rid.slotNo = i+1;
 	key = num - i; 
